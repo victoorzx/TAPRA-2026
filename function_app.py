@@ -59,7 +59,7 @@ def http_relay_trigger(req: func.HttpRequest) -> func.HttpResponse:
 def timer_caller_trigger(timerCaller: func.TimerRequest) -> None:
     logging.info('timer_caller_trigger disparado, chamando http_relay_trigger...')
 
-    url = "http://localhost:7071/api/http_relay_trigger"
+    url = "https://funcapp-tapra-victorbatista-ete5f7gycmasckbn.eastus-01.azurewebsites.net/api/http_relay_trigger"
     params = {"info": "mensagem enviada pela timer_caller_trigger"}
 
     try:
