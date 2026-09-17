@@ -1,6 +1,6 @@
 # TAPRA-2026
 
-Projeto de Azure Functions em Python para a disciplina [nome da disciplina].
+Projeto de Azure Functions em Python para a disciplina Tópicos Avançados em Programação.
 
 ## Integrantes da equipe
 - Victor Araújo Batista
