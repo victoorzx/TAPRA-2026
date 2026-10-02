@@ -1,69 +1,49 @@
 import logging
 import azure.functions as func
-import requests
+import os
+
+#importar a biblioteca de banco de dados
+import pyodbc
 
 app = func.FunctionApp()
 
-@app.timer_trigger(schedule="0 * * * * *", arg_name="myTimer", run_on_startup=False,
+@app.timer_trigger(schedule="0 */5 * * * *", arg_name="myTimer", run_on_startup=False,
               use_monitor=False) 
-def timer_log_trigger(myTimer: func.TimerRequest) -> None:
-    if myTimer.past_due:
-        logging.info('The timer is past due!')
+def extract_chamado(myTimer: func.TimerRequest) -> None:
+    
+    #capturar variaveis de ambiente
+    host_sql = os.getenv("HOST")
+    database_sql = os.getenv("DATABASE")
+    user_sql = os.getenv("USER")
+    pass_sql = os.getenv("PASSWORD")
 
-    logging.info('Python timer trigger function executed.')
+    #como montar uma string de conexao com PYODB AZURE DATABASE SQL
+    conn_str = (
+        "DRIVER={ODBC Driver 18 for SQL Server};"
+        f"SERVER=tcp:{host_sql},1433;"
+        f"DATABASE={database_sql};"
+        f"UID={user_sql};"
+        f"PWD={pass_sql};"
+        "Encrypt=yes;"
+        "TrustServerCertificate=no;"
+        "Connection Timeout=30;"
+    )   
 
-@app.route(route="http_get_trigger", auth_level=func.AuthLevel.ANONYMOUS)
-def http_get_trigger(req: func.HttpRequest) -> func.HttpResponse:
-    logging.info('Python HTTP trigger function processed a request.')
-
-    name = req.params.get('name')
-    if not name:
-        try:
-            req_body = req.get_json()
-        except ValueError:
-            pass
-        else:
-            name = req_body.get('name')
-
-    if name:
-        return func.HttpResponse(f"Hello, {name}. This HTTP triggered function executed successfully.")
-    else:
-        return func.HttpResponse(
-             "This HTTP triggered function executed successfully. Pass a name in the query string or in the request body for a personalized response.",
-             status_code=200
-        )
-
-@app.route(route="http_relay_trigger", auth_level=func.AuthLevel.ANONYMOUS)
-def http_relay_trigger(req: func.HttpRequest) -> func.HttpResponse:
-    logging.info('http_relay_trigger recebeu uma chamada.')
-
-    info = req.params.get('info')
-    if not info:
-        try:
-            req_body = req.get_json()
-        except ValueError:
-            req_body = None
-        if req_body:
-            info = req_body.get('info')
-
-    if info:
-        resultado = f"{info} - processado pela http_relay_trigger"
-        return func.HttpResponse(resultado, status_code=200)
-    else:
-        return func.HttpResponse(
-            "Nenhuma informação recebida no parâmetro 'info'.",
-            status_code=400
-        )
-
-@app.timer_trigger(schedule="0 */2 * * * *", arg_name="timerCaller", run_on_startup=False, use_monitor=False)
-def timer_caller_trigger(timerCaller: func.TimerRequest) -> None:
-    logging.info('timer_caller_trigger disparado, chamando http_relay_trigger...')
-
-    url = "https://funcapp-tapra-victorbatista-ete5f7gycmasckbn.eastus-01.azurewebsites.net/api/http_relay_trigger"
-    params = {"info": "mensagem enviada pela timer_caller_trigger"}
+    #Abrir a conexão
+    #fazer um select em qualquer tabela ex: itsm.chamado
+    # imprimir usando logging
 
     try:
-        response = requests.get(url, params=params, timeout=10)
-        logging.info(f'Resposta da http_relay_trigger: {response.text}')
+        with pyodbc.connect(conn_str) as conn:
+            cursor = conn.cursor()
+
+            
+            cursor.execute("SELECT TOP 10 * FROM itsm.chamado")
+            rows = cursor.fetchall()
+
+            
+            logging.info(f"Linhas capturadas da tabela chamado: {len(rows)}")
+            for row in rows:
+                logging.info(row)
     except Exception as e:
-        logging.error(f'Erro ao chamar http_relay_trigger: {e}')
+        logging.error(f"Erro ao consultar o banco: {e}")
