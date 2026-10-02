@@ -2,6 +2,9 @@
 
 Projeto de Azure Functions em Python para a disciplina Tópicos Avançados em Programação.
 
+# Última atualização 02/10
+Exercício de conexão com banco de dados via PYODBC
+
 ## 🏗️ Arquitetura do Projeto
 
 <p align="center">
