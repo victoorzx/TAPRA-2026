@@ -279,4 +279,42 @@ def fila(myTimer: func.TimerRequest) -> None:
     except Exception as e:
         logging.error(f"Erro ao consultar a tabela fila: {e}")
 
+@app.timer_trigger(schedule="40 */5 * * * *", arg_name="myTimer", run_on_startup=False,
+              use_monitor=False)
+def sla(myTimer: func.TimerRequest) -> None:
+
+
+    host_sql = os.getenv("HOST")
+    database_sql = os.getenv("DATABASE")
+    user_sql = os.getenv("USER")
+    pass_sql = os.getenv("PASSWORD")
+
+
+    conn_str = (
+        "DRIVER={ODBC Driver 18 for SQL Server};"
+        f"SERVER=tcp:{host_sql},1433;"
+        f"DATABASE={database_sql};"
+        f"UID={user_sql};"
+        f"PWD={pass_sql};"
+        "Encrypt=yes;"
+        "TrustServerCertificate=no;"
+        "Connection Timeout=30;"
+    )
+
+
+    try:
+        with pyodbc.connect(conn_str) as conn:
+            cursor = conn.cursor()
+
+
+            cursor.execute("SELECT TOP 10 * FROM itsm.sla")
+            rows = cursor.fetchall()
+
+
+            logging.info(f"Linhas capturadas da tabela sla: {len(rows)}")
+            for row in rows:
+                logging.info(row)
+    except Exception as e:
+        logging.error(f"Erro ao consultar a tabela sla: {e}")
+
     
