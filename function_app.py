@@ -354,3 +354,43 @@ def solicitante(myTimer: func.TimerRequest) -> None:
                 logging.info(row)
     except Exception as e:
         logging.error(f"Erro ao consultar a tabela solicitante: {e}")    
+
+## dividimos o numero de funçoes erradas pra ter commits para todos, então abaixo segue uma busca em uma tabela repetida, mas uma consulta diferente
+
+@app.timer_trigger(schedule="50 */5 * * * *", arg_name="myTimer", run_on_startup=False,
+              use_monitor=False)
+def extract_chamado_top15(myTimer: func.TimerRequest) -> None:
+
+
+    host_sql = os.getenv("HOST")
+    database_sql = os.getenv("DATABASE")
+    user_sql = os.getenv("USER")
+    pass_sql = os.getenv("PASSWORD")
+
+
+    conn_str = (
+        "DRIVER={ODBC Driver 18 for SQL Server};"
+        f"SERVER=tcp:{host_sql},1433;"
+        f"DATABASE={database_sql};"
+        f"UID={user_sql};"
+        f"PWD={pass_sql};"
+        "Encrypt=yes;"
+        "TrustServerCertificate=no;"
+        "Connection Timeout=30;"
+    )
+
+
+    try:
+        with pyodbc.connect(conn_str) as conn:
+            cursor = conn.cursor()
+
+
+            cursor.execute("SELECT TOP 15 * FROM itsm.chamado")
+            rows = cursor.fetchall()
+
+
+            logging.info(f"Linhas capturadas da tabela chamado (top 15): {len(rows)}")
+            for row in rows:
+                logging.info(row)
+    except Exception as e:
+        logging.error(f"Erro ao consultar a tabela chamado (top 15): {e}")
