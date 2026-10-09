@@ -381,7 +381,7 @@ def extract_chamado_top15(myTimer: func.TimerRequest) -> None:
 
 
     try:
-        with pyo dbc.connect(conn_str) as conn:
+        with pyodbc.connect(conn_str) as conn:
             cursor = conn.cursor()
 
 
