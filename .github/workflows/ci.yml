@@ -9,5 +9,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - run: python3 --version
-      - run: python3 -m py_compile function_app.py
+
+      - name: Instalar ferramentas de qualidade
+        run: pip install flake8 black isort
+
+      - name: Verificar sintaxe
+        run: python3 -m py_compile function_app.py
+
+      - name: Verificar ordem dos imports (isort)
+        run: isort --profile black --check-only --diff function_app.py
+
+      - name: Verificar formatação (black)
+        run: black --check --diff function_app.py
+
+      - name: Linting (flake8)
+        run: flake8 --max-line-length=88 --extend-ignore=E203,W503 function_app.py
