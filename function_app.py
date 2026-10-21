@@ -4,23 +4,26 @@ import logging
 import os
 from datetime import datetime, timezone
 
-import pyodbc
 import azure.functions as func
+import pyodbc
 from azure.storage.filedatalake import DataLakeServiceClient
 
 app = func.FunctionApp()
 
-@app.timer_trigger(schedule="0 * * * * *", arg_name="myTimer", run_on_startup=False,
-              use_monitor=False) 
+
+@app.timer_trigger(
+    schedule="0 */5 * * * *",
+    arg_name="myTimer",
+    run_on_startup=False,
+    use_monitor=False,
+)
 def extract_chamado(myTimer: func.TimerRequest) -> None:
-    logging.info('tabela chamado')
-    
+    logging.info("tabela chamado")
+
     sql_server = os.getenv("HOST")
     sql_database = os.getenv("DATABASE")
     sql_user = os.getenv("USER")
     sql_pass = os.getenv("PASSWORD")
-
-    logging.info(f'servidor={sql_server}, banco de dados={sql_database}, usuario={sql_user}, senha={sql_pass} ')
 
     # Configura a string de conexão para o banco de dados SQL Server
     conn_str = (
@@ -34,13 +37,12 @@ def extract_chamado(myTimer: func.TimerRequest) -> None:
         "Connection Timeout=30;"
     )
 
-
     try:
         # Estabelece a conexão com o banco de dados usando pyodbc
         with pyodbc.connect(conn_str) as conn:
             # Cria um cursor para executar a consulta
             cursor = conn.cursor()
-            
+
             query = "select * from itsm.chamado"
 
             # Executa a consulta SQL
@@ -50,7 +52,7 @@ def extract_chamado(myTimer: func.TimerRequest) -> None:
             rows = cursor.fetchall()
             columns = [col[0] for col in cursor.description]
 
-            logging.info(f'{len(rows)} linhas lidas de itsm.chamado')
+            logging.info(f"{len(rows)} linhas lidas de itsm.chamado")
 
         # Cria um buffer de memória para armazenar os dados CSV
         buffer = io.StringIO()
@@ -65,17 +67,18 @@ def extract_chamado(myTimer: func.TimerRequest) -> None:
         now = datetime.now(timezone.utc)
         file_path = f"chamado/{now:%Y/%m/%d}/chamado_{now:%Y%m%d_%H%M%S}.csv"
 
-        #itsm/chamado/year=2024/month=06/day=05/chamado_20240605_123456.csv
-        #file_path = f"itsm/chamado/year={now:%Y}/month={now:%m}/day={now:%d}/chamado_{now:%Y%m%d_%H%M%S}.csv"
-
         # Cria o cliente do Data Lake e grava o arquivo no contêiner bronze
-        datalake = DataLakeServiceClient.from_connection_string(os.getenv("DATALAKE_CONNECTION_STRING"))
+        datalake = DataLakeServiceClient.from_connection_string(
+            os.getenv("DATALAKE_CONNECTION_STRING")
+        )
         # Cria o cliente do sistema de arquivos e grava o arquivo no contêiner bronze
-        file_client = datalake.get_file_system_client("bronze").get_file_client(file_path)
+        file_client = datalake.get_file_system_client("bronze").get_file_client(
+            file_path
+        )
         # Grava os dados do buffer no arquivo do Data Lake, sobrescrevendo se já existir
         file_client.upload_data(buffer.getvalue().encode("utf-8"), overwrite=True)
 
-        logging.info(f'Arquivo gravado em bronze/{file_path}')
+        logging.info(f"Arquivo gravado em bronze/{file_path}")
 
     except Exception as e:
         logging.error(f"Erro ao ler itsm.chamado: {str(e)}")
