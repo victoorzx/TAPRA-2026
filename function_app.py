@@ -83,3 +83,4 @@ def extract_chamado(myTimer: func.TimerRequest) -> None:
     except Exception as e:
         logging.error(f"Erro ao ler itsm.chamado: {str(e)}")
         raise
+    
