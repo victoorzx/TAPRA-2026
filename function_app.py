@@ -1,12 +1,32 @@
+import json
 import logging
 import os
+from datetime import datetime, timezone
 
 import azure.functions as func
-
-# importar a biblioteca de banco de dados
 import pyodbc
+from azure.storage.blob import BlobServiceClient
 
 app = func.FunctionApp()
+
+def salvar_no_bronze(entidade, colunas, linhas):
+    agora = datetime.now(timezone.utc)
+    caminho = (
+        f"itsm/{entidade}/"
+        f"ano={agora:%Y}/mes={agora:%m}/dia={agora:%d}/"
+        f"{entidade}_{agora:%Y%m%dT%H%M%SZ}.json"
+    )
+
+    registros = [dict(zip(colunas, linha)) for linha in linhas]
+    conteudo = json.dumps(registros, default=str, ensure_ascii=False)
+
+    cliente = BlobServiceClient.from_connection_string(
+        os.getenv("DATALAKE_CONNECTION_STRING")
+    )
+    blob = cliente.get_blob_client(container="bronze", blob=caminho)
+    blob.upload_blob(conteudo, overwrite=True)
+
+    logging.info(f"Arquivo salvo no bronze: {caminho}")
 
 
 @app.timer_trigger(
@@ -33,16 +53,16 @@ def extract_chamado(myTimer: func.TimerRequest) -> None:
         "Connection Timeout=30;"
     )
 
-    try:
+        try:
         with pyodbc.connect(conn_str) as conn:
             cursor = conn.cursor()
 
-            cursor.execute("SELECT TOP 10 * FROM itsm.chamado")
+            cursor.execute("SELECT * FROM itsm.chamado")
             rows = cursor.fetchall()
+            colunas = [coluna[0] for coluna in cursor.description]
 
             logging.info(f"Linhas capturadas da tabela chamado: {len(rows)}")
-            for row in rows:
-                logging.info(row)
+            salvar_no_bronze("chamados", colunas, rows)
     except Exception as e:
         logging.error(f"Erro ao consultar a tabela chamado: {e}")
 
