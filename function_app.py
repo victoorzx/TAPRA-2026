@@ -1,454 +1,82 @@
-import json
+import csv
+import io
 import logging
 import os
 from datetime import datetime, timezone
 
-import azure.functions as func
 import pyodbc
-from azure.storage.blob import BlobServiceClient
+import azure.functions as func
+from azure.storage.filedatalake import DataLakeServiceClient
 
 app = func.FunctionApp()
 
-def salvar_no_bronze(entidade, colunas, linhas):
-    agora = datetime.now(timezone.utc)
-    caminho = (
-        f"itsm/{entidade}/"
-        f"ano={agora:%Y}/mes={agora:%m}/dia={agora:%d}/"
-        f"{entidade}_{agora:%Y%m%dT%H%M%SZ}.json"
-    )
-
-    registros = [dict(zip(colunas, linha)) for linha in linhas]
-    conteudo = json.dumps(registros, default=str, ensure_ascii=False)
-
-    cliente = BlobServiceClient.from_connection_string(
-        os.getenv("DATALAKE_CONNECTION_STRING")
-    )
-    blob = cliente.get_blob_client(container="bronze", blob=caminho)
-    blob.upload_blob(conteudo, overwrite=True)
-
-    logging.info(f"Arquivo salvo no bronze: {caminho}")
-
-
-@app.timer_trigger(
-    schedule="0 */5 * * * *",
-    arg_name="myTimer",
-    run_on_startup=False,
-    use_monitor=False,
-)
+@app.timer_trigger(schedule="0 * * * * *", arg_name="myTimer", run_on_startup=False,
+              use_monitor=False) 
 def extract_chamado(myTimer: func.TimerRequest) -> None:
+    logging.info('tabela chamado')
+    
+    sql_server = os.getenv("HOST")
+    sql_database = os.getenv("DATABASE")
+    sql_user = os.getenv("USER")
+    sql_pass = os.getenv("PASSWORD")
 
-    host_sql = os.getenv("HOST")
-    database_sql = os.getenv("DATABASE")
-    user_sql = os.getenv("USER")
-    pass_sql = os.getenv("PASSWORD")
+    logging.info(f'servidor={sql_server}, banco de dados={sql_database}, usuario={sql_user}, senha={sql_pass} ')
 
+    # Configura a string de conexão para o banco de dados SQL Server
     conn_str = (
         "DRIVER={ODBC Driver 18 for SQL Server};"
-        f"SERVER=tcp:{host_sql},1433;"
-        f"DATABASE={database_sql};"
-        f"UID={user_sql};"
-        f"PWD={pass_sql};"
+        f"SERVER={sql_server};"
+        f"DATABASE={sql_database};"
+        f"UID={sql_user};"
+        f"PWD={sql_pass};"
         "Encrypt=yes;"
         "TrustServerCertificate=no;"
         "Connection Timeout=30;"
     )
 
-        try:
-        with pyodbc.connect(conn_str) as conn:
-            cursor = conn.cursor()
-
-            cursor.execute("SELECT * FROM itsm.chamado")
-            rows = cursor.fetchall()
-            colunas = [coluna[0] for coluna in cursor.description]
-
-            logging.info(f"Linhas capturadas da tabela chamado: {len(rows)}")
-            salvar_no_bronze("chamados", colunas, rows)
-    except Exception as e:
-        logging.error(f"Erro ao consultar a tabela chamado: {e}")
-
-
-@app.timer_trigger(
-    schedule="5 */5 * * * *",
-    arg_name="myTimer",
-    run_on_startup=False,
-    use_monitor=False,
-)
-def analistatabela(myTimer: func.TimerRequest) -> None:
-
-    host_sql = os.getenv("HOST")
-    database_sql = os.getenv("DATABASE")
-    user_sql = os.getenv("USER")
-    pass_sql = os.getenv("PASSWORD")
-
-    conn_str = (
-        "DRIVER={ODBC Driver 18 for SQL Server};"
-        f"SERVER=tcp:{host_sql},1433;"
-        f"DATABASE={database_sql};"
-        f"UID={user_sql};"
-        f"PWD={pass_sql};"
-        "Encrypt=yes;"
-        "TrustServerCertificate=no;"
-        "Connection Timeout=30;"
-    )
 
     try:
+        # Estabelece a conexão com o banco de dados usando pyodbc
         with pyodbc.connect(conn_str) as conn:
+            # Cria um cursor para executar a consulta
             cursor = conn.cursor()
+            
+            query = "select * from itsm.chamado"
 
-            cursor.execute("SELECT TOP 10 * FROM itsm.analista")
+            # Executa a consulta SQL
+            cursor.execute(query)
+
+            # Busca todos os resultados da consulta
             rows = cursor.fetchall()
+            columns = [col[0] for col in cursor.description]
 
-            logging.info(f"Linhas capturadas da tabela analista: {len(rows)}")
-            for row in rows:
-                logging.info(row)
+            logging.info(f'{len(rows)} linhas lidas de itsm.chamado')
+
+        # Cria um buffer de memória para armazenar os dados CSV
+        buffer = io.StringIO()
+        # Cria um objeto CSV writer e escreve os dados no buffer
+        writer = csv.writer(buffer)
+        # Escreve o cabeçalho e as linhas no buffer CSV
+        writer.writerow(columns)
+        # Escreve todas as linhas no buffer CSV
+        writer.writerows(rows)
+
+        # Grava o arquivo no contêiner bronze do Data Lake, particionado por data
+        now = datetime.now(timezone.utc)
+        file_path = f"chamado/{now:%Y/%m/%d}/chamado_{now:%Y%m%d_%H%M%S}.csv"
+
+        #itsm/chamado/year=2024/month=06/day=05/chamado_20240605_123456.csv
+        #file_path = f"itsm/chamado/year={now:%Y}/month={now:%m}/day={now:%d}/chamado_{now:%Y%m%d_%H%M%S}.csv"
+
+        # Cria o cliente do Data Lake e grava o arquivo no contêiner bronze
+        datalake = DataLakeServiceClient.from_connection_string(os.getenv("DATALAKE_CONNECTION_STRING"))
+        # Cria o cliente do sistema de arquivos e grava o arquivo no contêiner bronze
+        file_client = datalake.get_file_system_client("bronze").get_file_client(file_path)
+        # Grava os dados do buffer no arquivo do Data Lake, sobrescrevendo se já existir
+        file_client.upload_data(buffer.getvalue().encode("utf-8"), overwrite=True)
+
+        logging.info(f'Arquivo gravado em bronze/{file_path}')
+
     except Exception as e:
-        logging.error(f"Erro ao consultar a tabela analista: {e}")
-
-
-@app.timer_trigger(
-    schedule="10 */5 * * * *",
-    arg_name="myTimer",
-    run_on_startup=False,
-    use_monitor=False,
-)
-def categoriatabela(myTimer: func.TimerRequest) -> None:
-
-    host_sql = os.getenv("HOST")
-    database_sql = os.getenv("DATABASE")
-    user_sql = os.getenv("USER")
-    pass_sql = os.getenv("PASSWORD")
-
-    conn_str = (
-        "DRIVER={ODBC Driver 18 for SQL Server};"
-        f"SERVER=tcp:{host_sql},1433;"
-        f"DATABASE={database_sql};"
-        f"UID={user_sql};"
-        f"PWD={pass_sql};"
-        "Encrypt=yes;"
-        "TrustServerCertificate=no;"
-        "Connection Timeout=30;"
-    )
-
-    try:
-        with pyodbc.connect(conn_str) as conn:
-            cursor = conn.cursor()
-
-            cursor.execute("SELECT TOP 10 * FROM itsm.categoria")
-            rows = cursor.fetchall()
-
-            logging.info(f"Linhas capturadas da tabela categoria: {len(rows)}")
-            for row in rows:
-                logging.info(row)
-    except Exception as e:
-        logging.error(f"Erro ao consultar a tabela categoria: {e}")
-
-
-@app.timer_trigger(
-    schedule="15 */5 * * * *",
-    arg_name="myTimer",
-    run_on_startup=False,
-    use_monitor=False,
-)
-def chamado_slatabela(myTimer: func.TimerRequest) -> None:
-
-    host_sql = os.getenv("HOST")
-    database_sql = os.getenv("DATABASE")
-    user_sql = os.getenv("USER")
-    pass_sql = os.getenv("PASSWORD")
-
-    conn_str = (
-        "DRIVER={ODBC Driver 18 for SQL Server};"
-        f"SERVER=tcp:{host_sql},1433;"
-        f"DATABASE={database_sql};"
-        f"UID={user_sql};"
-        f"PWD={pass_sql};"
-        "Encrypt=yes;"
-        "TrustServerCertificate=no;"
-        "Connection Timeout=30;"
-    )
-
-    try:
-        with pyodbc.connect(conn_str) as conn:
-            cursor = conn.cursor()
-
-            cursor.execute("SELECT TOP 10 * FROM itsm.chamado_sla")
-            rows = cursor.fetchall()
-
-            logging.info(f"Linhas capturadas da tabela chamado_sla: {len(rows)}")
-            for row in rows:
-                logging.info(row)
-    except Exception as e:
-        logging.error(f"Erro ao consultar a tabela chamado_sla: {e}")
-
-
-@app.timer_trigger(
-    schedule="20 */5 * * * *",
-    arg_name="myTimer",
-    run_on_startup=False,
-    use_monitor=False,
-)
-def chamado_status_historico(myTimer: func.TimerRequest) -> None:
-
-    host_sql = os.getenv("HOST")
-    database_sql = os.getenv("DATABASE")
-    user_sql = os.getenv("USER")
-    pass_sql = os.getenv("PASSWORD")
-
-    conn_str = (
-        "DRIVER={ODBC Driver 18 for SQL Server};"
-        f"SERVER=tcp:{host_sql},1433;"
-        f"DATABASE={database_sql};"
-        f"UID={user_sql};"
-        f"PWD={pass_sql};"
-        "Encrypt=yes;"
-        "TrustServerCertificate=no;"
-        "Connection Timeout=30;"
-    )
-
-    try:
-        with pyodbc.connect(conn_str) as conn:
-            cursor = conn.cursor()
-
-            cursor.execute("SELECT TOP 10 * FROM itsm.chamado_status_historico")
-            rows = cursor.fetchall()
-
-            logging.info(
-                f"Linhas capturadas da tabela chamado_status_historico: {len(rows)}"
-            )
-            for row in rows:
-                logging.info(row)
-    except Exception as e:
-        logging.error(f"Erro ao consultar a tabela chamado_status_historico: {e}")
-
-
-@app.timer_trigger(
-    schedule="25 */5 * * * *",
-    arg_name="myTimer",
-    run_on_startup=False,
-    use_monitor=False,
-)
-def clienteorganizacaotabela(myTimer: func.TimerRequest) -> None:
-
-    host_sql = os.getenv("HOST")
-    database_sql = os.getenv("DATABASE")
-    user_sql = os.getenv("USER")
-    pass_sql = os.getenv("PASSWORD")
-
-    conn_str = (
-        "DRIVER={ODBC Driver 18 for SQL Server};"
-        f"SERVER=tcp:{host_sql},1433;"
-        f"DATABASE={database_sql};"
-        f"UID={user_sql};"
-        f"PWD={pass_sql};"
-        "Encrypt=yes;"
-        "TrustServerCertificate=no;"
-        "Connection Timeout=30;"
-    )
-
-    try:
-        with pyodbc.connect(conn_str) as conn:
-            cursor = conn.cursor()
-
-            cursor.execute("SELECT TOP 10 * FROM itsm.cliente_organizacao")
-            rows = cursor.fetchall()
-
-            logging.info(
-                f"Linhas capturadas da tabela cliente_organizacao: {len(rows)}"
-            )
-            for row in rows:
-                logging.info(row)
-    except Exception as e:
-        logging.error(f"Erro ao consultar a tabela cliente_organizacao: {e}")
-
-
-@app.timer_trigger(
-    schedule="30 */5 * * * *",
-    arg_name="myTimer",
-    run_on_startup=False,
-    use_monitor=False,
-)
-def csat_avaliacao(myTimer: func.TimerRequest) -> None:
-
-    host_sql = os.getenv("HOST")
-    database_sql = os.getenv("DATABASE")
-    user_sql = os.getenv("USER")
-    pass_sql = os.getenv("PASSWORD")
-
-    conn_str = (
-        "DRIVER={ODBC Driver 18 for SQL Server};"
-        f"SERVER=tcp:{host_sql},1433;"
-        f"DATABASE={database_sql};"
-        f"UID={user_sql};"
-        f"PWD={pass_sql};"
-        "Encrypt=yes;"
-        "TrustServerCertificate=no;"
-        "Connection Timeout=30;"
-    )
-
-    try:
-        with pyodbc.connect(conn_str) as conn:
-            cursor = conn.cursor()
-
-            cursor.execute("SELECT TOP 10 * FROM itsm.csat_avaliacao")
-            rows = cursor.fetchall()
-
-            logging.info(f"Linhas capturadas da tabela csat_avaliacao: {len(rows)}")
-            for row in rows:
-                logging.info(row)
-    except Exception as e:
-        logging.error(f"Erro ao consultar a tabela csat_avaliacao: {e}")
-
-
-@app.timer_trigger(
-    schedule="35 */5 * * * *",
-    arg_name="myTimer",
-    run_on_startup=False,
-    use_monitor=False,
-)
-def fila(myTimer: func.TimerRequest) -> None:
-
-    host_sql = os.getenv("HOST")
-    database_sql = os.getenv("DATABASE")
-    user_sql = os.getenv("USER")
-    pass_sql = os.getenv("PASSWORD")
-
-    conn_str = (
-        "DRIVER={ODBC Driver 18 for SQL Server};"
-        f"SERVER=tcp:{host_sql},1433;"
-        f"DATABASE={database_sql};"
-        f"UID={user_sql};"
-        f"PWD={pass_sql};"
-        "Encrypt=yes;"
-        "TrustServerCertificate=no;"
-        "Connection Timeout=30;"
-    )
-
-    try:
-        with pyodbc.connect(conn_str) as conn:
-            cursor = conn.cursor()
-
-            cursor.execute("SELECT TOP 10 * FROM itsm.fila")
-            rows = cursor.fetchall()
-
-            logging.info(f"Linhas capturadas da tabela fila: {len(rows)}")
-            for row in rows:
-                logging.info(row)
-    except Exception as e:
-        logging.error(f"Erro ao consultar a tabela fila: {e}")
-
-
-@app.timer_trigger(
-    schedule="40 */5 * * * *",
-    arg_name="myTimer",
-    run_on_startup=False,
-    use_monitor=False,
-)
-def sla(myTimer: func.TimerRequest) -> None:
-
-    host_sql = os.getenv("HOST")
-    database_sql = os.getenv("DATABASE")
-    user_sql = os.getenv("USER")
-    pass_sql = os.getenv("PASSWORD")
-
-    conn_str = (
-        "DRIVER={ODBC Driver 18 for SQL Server};"
-        f"SERVER=tcp:{host_sql},1433;"
-        f"DATABASE={database_sql};"
-        f"UID={user_sql};"
-        f"PWD={pass_sql};"
-        "Encrypt=yes;"
-        "TrustServerCertificate=no;"
-        "Connection Timeout=30;"
-    )
-
-    try:
-        with pyodbc.connect(conn_str) as conn:
-            cursor = conn.cursor()
-
-            cursor.execute("SELECT TOP 10 * FROM itsm.sla")
-            rows = cursor.fetchall()
-
-            logging.info(f"Linhas capturadas da tabela sla: {len(rows)}")
-            for row in rows:
-                logging.info(row)
-    except Exception as e:
-        logging.error(f"Erro ao consultar a tabela sla: {e}")
-
-
-@app.timer_trigger(
-    schedule="45 */5 * * * *",
-    arg_name="myTimer",
-    run_on_startup=False,
-    use_monitor=False,
-)
-def solicitante(myTimer: func.TimerRequest) -> None:
-
-    host_sql = os.getenv("HOST")
-    database_sql = os.getenv("DATABASE")
-    user_sql = os.getenv("USER")
-    pass_sql = os.getenv("PASSWORD")
-
-    conn_str = (
-        "DRIVER={ODBC Driver 18 for SQL Server};"
-        f"SERVER=tcp:{host_sql},1433;"
-        f"DATABASE={database_sql};"
-        f"UID={user_sql};"
-        f"PWD={pass_sql};"
-        "Encrypt=yes;"
-        "TrustServerCertificate=no;"
-        "Connection Timeout=30;"
-    )
-
-    try:
-        with pyodbc.connect(conn_str) as conn:
-            cursor = conn.cursor()
-
-            cursor.execute("SELECT TOP 10 * FROM itsm.solicitante")
-            rows = cursor.fetchall()
-
-            logging.info(f"Linhas capturadas da tabela solicitante: {len(rows)}")
-            for row in rows:
-                logging.info(row)
-    except Exception as e:
-        logging.error(f"Erro ao consultar a tabela solicitante: {e}")
-
-
-# Extra: mesma tabela chamado, com consulta diferente (TOP 15)
-
-
-@app.timer_trigger(
-    schedule="50 */5 * * * *",
-    arg_name="myTimer",
-    run_on_startup=False,
-    use_monitor=False,
-)
-def extract_chamado_top15(myTimer: func.TimerRequest) -> None:
-
-    host_sql = os.getenv("HOST")
-    database_sql = os.getenv("DATABASE")
-    user_sql = os.getenv("USER")
-    pass_sql = os.getenv("PASSWORD")
-
-    conn_str = (
-        "DRIVER={ODBC Driver 18 for SQL Server};"
-        f"SERVER=tcp:{host_sql},1433;"
-        f"DATABASE={database_sql};"
-        f"UID={user_sql};"
-        f"PWD={pass_sql};"
-        "Encrypt=yes;"
-        "TrustServerCertificate=no;"
-        "Connection Timeout=30;"
-    )
-
-    try:
-        with pyodbc.connect(conn_str) as conn:
-            cursor = conn.cursor()
-
-            cursor.execute("SELECT TOP 15 * FROM itsm.chamado")
-            rows = cursor.fetchall()
-
-            logging.info(f"Linhas capturadas da tabela chamado (top 15): {len(rows)}")
-            for row in rows:
-                logging.info(row)
-    except Exception as e:
-        logging.error(f"Erro ao consultar a tabela chamado (top 15): {e}")
+        logging.error(f"Erro ao ler itsm.chamado: {str(e)}")
+        raise
