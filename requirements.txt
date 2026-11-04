@@ -5,5 +5,3 @@
 azure-functions
 pyodbc
 azure-storage-file-datalake
-ruff
-logging
