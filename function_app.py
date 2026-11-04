@@ -11,22 +11,12 @@ from azure.storage.filedatalake import DataLakeServiceClient
 app = func.FunctionApp()
 
 
-@app.timer_trigger(
-    schedule="0 */5 * * * *",
-    arg_name="myTimer",
-    run_on_startup=False,
-    use_monitor=False,
-)
-def extract_chamado(myTimer: func.TimerRequest) -> None:
-    logging.info("tabela chamado")
-
+def get_conn_str():
     sql_server = os.getenv("HOST")
     sql_database = os.getenv("DATABASE")
     sql_user = os.getenv("USER")
     sql_pass = os.getenv("PASSWORD")
-
-    # Configura a string de conexão para o banco de dados SQL Server
-    conn_str = (
+    return (
         "DRIVER={ODBC Driver 18 for SQL Server};"
         f"SERVER={sql_server};"
         f"DATABASE={sql_database};"
@@ -37,49 +27,134 @@ def extract_chamado(myTimer: func.TimerRequest) -> None:
         "Connection Timeout=30;"
     )
 
+
+def extract_to_bronze(table):
+    logging.info(f"tabela {table}")
     try:
-        # Estabelece a conexão com o banco de dados usando pyodbc
-        with pyodbc.connect(conn_str) as conn:
-            # Cria um cursor para executar a consulta
+        with pyodbc.connect(get_conn_str()) as conn:
             cursor = conn.cursor()
-
-            query = "select * from itsm.chamado"
-
-            # Executa a consulta SQL
-            cursor.execute(query)
-
-            # Busca todos os resultados da consulta
+            cursor.execute(f"select * from itsm.{table}")
             rows = cursor.fetchall()
             columns = [col[0] for col in cursor.description]
+            logging.info(f"{len(rows)} linhas lidas de itsm.{table}")
 
-            logging.info(f"{len(rows)} linhas lidas de itsm.chamado")
-
-        # Cria um buffer de memória para armazenar os dados CSV
         buffer = io.StringIO()
-        # Cria um objeto CSV writer e escreve os dados no buffer
         writer = csv.writer(buffer)
-        # Escreve o cabeçalho e as linhas no buffer CSV
         writer.writerow(columns)
-        # Escreve todas as linhas no buffer CSV
         writer.writerows(rows)
 
-        # Grava o arquivo no contêiner bronze do Data Lake, particionado por data
         now = datetime.now(timezone.utc)
-        file_path = f"chamado/{now:%Y/%m/%d}/chamado_{now:%Y%m%d_%H%M%S}.csv"
+        file_path = f"{table}/{now:%Y/%m/%d}/{table}_{now:%Y%m%d_%H%M%S}.csv"
 
-        # Cria o cliente do Data Lake e grava o arquivo no contêiner bronze
         datalake = DataLakeServiceClient.from_connection_string(
             os.getenv("DATALAKE_CONNECTION_STRING")
         )
-        # Cria o cliente do sistema de arquivos e grava o arquivo no contêiner bronze
         file_client = datalake.get_file_system_client("bronze").get_file_client(
             file_path
         )
-        # Grava os dados do buffer no arquivo do Data Lake, sobrescrevendo se já existir
         file_client.upload_data(buffer.getvalue().encode("utf-8"), overwrite=True)
 
         logging.info(f"Arquivo gravado em bronze/{file_path}")
-
     except Exception as e:
-        logging.error(f"Erro ao ler itsm.chamado: {str(e)}")
+        logging.error(f"Erro ao ler itsm.{table}: {str(e)}")
         raise
+
+
+@app.timer_trigger(
+    schedule="0 */5 * * * *",
+    arg_name="myTimer",
+    run_on_startup=False,
+    use_monitor=False,
+)
+def extract_chamado(myTimer: func.TimerRequest) -> None:
+    extract_to_bronze("chamado")
+
+
+@app.timer_trigger(
+    schedule="5 */5 * * * *",
+    arg_name="myTimer",
+    run_on_startup=False,
+    use_monitor=False,
+)
+def extract_analista(myTimer: func.TimerRequest) -> None:
+    extract_to_bronze("analista")
+
+
+@app.timer_trigger(
+    schedule="10 */5 * * * *",
+    arg_name="myTimer",
+    run_on_startup=False,
+    use_monitor=False,
+)
+def extract_categoria(myTimer: func.TimerRequest) -> None:
+    extract_to_bronze("categoria")
+
+
+@app.timer_trigger(
+    schedule="15 */5 * * * *",
+    arg_name="myTimer",
+    run_on_startup=False,
+    use_monitor=False,
+)
+def extract_chamado_sla(myTimer: func.TimerRequest) -> None:
+    extract_to_bronze("chamado_sla")
+
+
+@app.timer_trigger(
+    schedule="20 */5 * * * *",
+    arg_name="myTimer",
+    run_on_startup=False,
+    use_monitor=False,
+)
+def extract_chamado_status_historico(myTimer: func.TimerRequest) -> None:
+    extract_to_bronze("chamado_status_historico")
+
+
+@app.timer_trigger(
+    schedule="25 */5 * * * *",
+    arg_name="myTimer",
+    run_on_startup=False,
+    use_monitor=False,
+)
+def extract_cliente_organizacao(myTimer: func.TimerRequest) -> None:
+    extract_to_bronze("cliente_organizacao")
+
+
+@app.timer_trigger(
+    schedule="30 */5 * * * *",
+    arg_name="myTimer",
+    run_on_startup=False,
+    use_monitor=False,
+)
+def extract_csat_avaliacao(myTimer: func.TimerRequest) -> None:
+    extract_to_bronze("csat_avaliacao")
+
+
+@app.timer_trigger(
+    schedule="35 */5 * * * *",
+    arg_name="myTimer",
+    run_on_startup=False,
+    use_monitor=False,
+)
+def extract_fila(myTimer: func.TimerRequest) -> None:
+    extract_to_bronze("fila")
+
+
+@app.timer_trigger(
+    schedule="40 */5 * * * *",
+    arg_name="myTimer",
+    run_on_startup=False,
+    use_monitor=False,
+)
+def extract_sla(myTimer: func.TimerRequest) -> None:
+    extract_to_bronze("sla")
+
+
+@app.timer_trigger(
+    schedule="45 */5 * * * *",
+    arg_name="myTimer",
+    run_on_startup=False,
+    use_monitor=False,
+)
+def extract_solicitante(myTimer: func.TimerRequest) -> None:
+    extract_to_bronze("solicitante")
